@@ -32,9 +32,6 @@ void setup() {
 }
 
 void loop() {
-  //Begin by breaking down the tileState into its component parts
-  team = tileState / 10;
-  fractureState = tileState % 10;
 
   //first, we need to listen for double clicks to change team
   if (buttonDoubleClicked()) {
@@ -62,8 +59,8 @@ void loop() {
   isHappy = true;
   numNeighbors = 0;
   FOREACH_FACE(f) {
-    if (faceInfo[f] == NEIGHBORED || faceInfo[f] == NEWFRIEND) { //this means the is something there
-      numNeighbors ++;
+    if (faceInfo[f] == NEIGHBORED || faceInfo[f] == NEWFRIEND) { //this means there is something there
+      numNeighbors++;
       if (getLastValueReceivedOnFace(f) / 10 == team) { //this means this neighbor is the same color as us. Oh no!
         isHappy = false;
       }
@@ -77,8 +74,6 @@ void loop() {
   tileState = team * 10;
   tileState += fractureState;
   setValueSentOnAllFaces(tileState);
-
-
 }
 
 void nominalLoop() {
@@ -109,7 +104,7 @@ void nominalLoop() {
     }
   }
 
-  if (!isHappy){//this is here to make sure the blink doesn't become unhappy while the colors are off
+  if (!isHappy) { //this is here to make sure the blink doesn't become unhappy while the colors are off
     setColor(makeColorHSB(playerHues[team], 255, 255));
   }
 
