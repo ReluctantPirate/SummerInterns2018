@@ -2,7 +2,7 @@ enum blinkStates {SLEEP, WAKE, PROD, GAMEA, GAMEB, MENU, PROGRAMA, PROGRAMB, LEA
 byte blinkState;
 bool menuToggle = true;
 byte currentGame = GAMEB;
-byte programType = PROGRAMA;
+byte programType = PROGRAMB;
 bool programInitiator = false;
 Timer animTimer;
 int animFrame = 0;
@@ -57,8 +57,7 @@ void loop() {
   }
 
   if (idleTimer.isExpired() && blinkState != SLEEP) {
-    setColor(OFF);
-    blinkState = SLEEP;
+    changeState(SLEEP);
     buttonDoubleClicked();
     buttonMenuPressed();
   }
@@ -68,12 +67,12 @@ void loop() {
 
 void sleepLoop() {
   if (buttonSingleClicked()) { //someone has hit the button. This is method 1 of waking up
-    blinkState = WAKE;
+    changeState(WAKE);
   }
 
   FOREACH_FACE(f) { //this looks for neighbors in WAKE state. Method 2 of waking up
     if (!isValueReceivedOnFaceExpired(f) && getLastValueReceivedOnFace(f) == PROD) {
-      blinkState = WAKE;
+      changeState(WAKE);
       idleTimer.set(60000);
     }
   }
@@ -91,16 +90,11 @@ void wakeLoop() {
   }
 
   if (animFrame > 3) { //you are halfway through wakeup. Start waking neighbors
-    blinkState = PROD;
+    changeState(PROD);
   }
 
   if (animFrame == 15) { //last frame of animation
-    blinkState = currentGame;
-    if (blinkState == GAMEA) {
-      setColor(ORANGE);
-    } else if (blinkState == GAMEB) {
-      setColor(RED);
-    }
+    changeState(currentGame);
   }
 }
 
@@ -120,15 +114,8 @@ void gameLoop() {
   //now we need to start looking out for menu press, but only when alone
   if (buttonMenuPressed()) {//you have to do this first to set the flag to false on every check
     if (isAlone()) {
-      blinkState = MENU;
+      changeState(MENU);
       menuIdleTimer.set(10000);
-      setColorOnFace(dim(GREEN, 16), 0);
-      setColorOnFace(dim(GREEN, 16), 1);
-      setColorOnFace(dim(GREEN, 16), 2);
-      setColorOnFace(dim(BLUE, 16), 3);
-      setColorOnFace(dim(BLUE, 16), 4);
-      setColorOnFace(dim(BLUE, 16), 5);
-      animFrame = 0;
     }
   }
 
@@ -136,19 +123,14 @@ void gameLoop() {
   FOREACH_FACE(f) {
     if (!isValueReceivedOnFaceExpired(f)) {//you found a neighbor
       if (getLastValueReceivedOnFace(f) == KO) { //KO command
-        blinkState = YAWN;
+        changeState(YAWN);
         menuIdleTimer.set(3000);//secondhand sleep timer
-        animFrame = 0;
       } else if (getLastValueReceivedOnFace(f) == PROGRAMA) {
-        blinkState = LEARNA;
+        changeState(LEARNA);
         learnTimer.set(6000);
-        setColor(GREEN);
-        animFrame = 0;
       } else if (getLastValueReceivedOnFace(f) == PROGRAMB) {
-        blinkState = LEARNB;
+        changeState(LEARNB);
         learnTimer.set(6000);
-        setColor(GREEN);
-        animFrame = 0;
       }
     }//end of found neighbor statement
   }//end of foreachface loop
@@ -188,22 +170,17 @@ void menuLoop() {
 
   if (buttonDoubleClicked()) { //type selected, move to appropriate mode
     if (menuToggle) {//head to the correct programming mode
-      blinkState = programType;
+      changeState(programType);
       programInitiator = true;
+      menuIdleTimer.set(6000);
     } else if (!menuToggle) {
-      blinkState = YAWN;
-      menuIdleTimer.set(10000);
-      animFrame = 0;
+      changeState(YAWN);
+      menuIdleTimer.set(3000);
     }
   }
 
   if (menuIdleTimer.isExpired()) {
-    blinkState = currentGame;
-    if (blinkState == GAMEA) {
-      setColor(ORANGE);
-    } else if (blinkState == GAMEB) {
-      setColor(RED);
-    }
+    changeState(currentGame);
   }
 }
 
@@ -217,50 +194,48 @@ void programLoop() {
   }
 
   if (buttonDoubleClicked()) {//return to menu if double clicked
-    blinkState = MENU;
-    setColorOnFace(dim(GREEN, 16), 0);//reset all the dimness, let the next thing correct for choice
-    setColorOnFace(dim(GREEN, 16), 1);
-    setColorOnFace(dim(GREEN, 16), 2);
-    setColorOnFace(dim(BLUE, 16), 3);
-    setColorOnFace(dim(BLUE, 16), 4);
-    setColorOnFace(dim(BLUE, 16), 5);
-    animFrame = 0;
+    changeState(MENU);
     menuIdleTimer.set(10000);
     programInitiator = false;
   }
 
-  //here we need to determine if it's safe to move to READY state
-  //to qualify, all neighbors must be in PROGRAMX or READY. No learners left
-  if (!isAlone()) {//we have some neighbors, lets look at them
-    bool readyCheck = false;
+  //in order to move from program to ready mode
+  //you need to check all neighbors
+  //IF you have neighbors in LEARNA, LEARNB, GAMEA, or GAMEB, stay in program mode
+  //only once you have no neighbors of that type can you move on
+  if (!isAlone) {
+    byte neighborsInNeed = 0;
     FOREACH_FACE(f) {
-      if (!isValueReceivedOnFaceExpired(f)) {//only do this check on spots WITH neighbors
-        if (getLastValueReceivedOnFace(f) == PROGRAMA || getLastValueReceivedOnFace(f) == PROGRAMB || getLastValueReceivedOnFace(f) == READY) {
-          //this face is good
-          readyCheck = true;
-        } else {
-          //in some other state
-          readyCheck = false;
+      byte neighborState = getLastValueReceivedOnFace(f);
+      if (!isValueReceivedOnFaceExpired(f)) { //there's something here
+        switch (neighborState) {
+          case LEARNA:
+          case LEARNB:
+          case GAMEA:
+          case GAMEB:
+            neighborsInNeed++;
+            break;
+        }//end of switch
+      }
+    }
+
+    if (neighborsInNeed == 0) { //no neighbors need programming anymore. Move to ready
+      changeState(READY);
+      if (programInitiator) {//this is where the program initiator actually changes game
+        switch (programType) {
+          case PROGRAMA:
+            currentGame = GAMEA;
+            break;
+          case PROGRAMB:
+            currentGame = GAMEB;
+            break;
         }
       }
     }
-    //so the face loop is over. If the readyCheck is true, we're golden
-    if (readyCheck) {
-      blinkState = READY;
-      setColor(dim(GREEN, 16));//just set it to a dim green
-      if (programInitiator) { //so for the one who begins things, THIS is where they change currentGame
-        currentGame = programType;
-      }
-    }
-  }
+  }//end of isAlone check
 
   if (menuIdleTimer.isExpired()) {
-    blinkState = currentGame;
-    if (blinkState == GAMEA) {
-      setColor(ORANGE);
-    } else if (blinkState == GAMEB) {
-      setColor(RED);
-    }
+    changeState(currentGame);
     programInitiator = false;
   }
 }
@@ -279,39 +254,37 @@ void learnLoop() {
   if (learnTimer.isExpired()) {//this means the game has been "learned" and we can move to PROGRAM state
     if (blinkState == LEARNA) {
       currentGame = GAMEA;
-      blinkState = PROGRAMA;
+      changeState(PROGRAMA);
     } else if (blinkState == LEARNB) {
       currentGame = GAMEB;
-      blinkState = PROGRAMB;
+      changeState(PROGRAMB);
     }
   }
 }
 
 void readyLoop() {
-  //so now we look at all neighbors and determine if all are in READY or GAME so we can transition to game state
-  bool gameCheck = false;
-  FOREACH_FACE(f) {
-    if (!isValueReceivedOnFaceExpired(f)) {//only check occupied faces
-      if (getLastValueReceivedOnFace(f) == READY || getLastValueReceivedOnFace(f) == currentGame) {
-        //this face is good
-        gameCheck = true;
-      } else {
-        //this face is no good
-        gameCheck = false;
-      }
-    }
-  }
-
-  if (gameCheck) { //survived the loop while still true
-    blinkState = currentGame;
-    if (currentGame == GAMEA) {
-      setColor(ORANGE);
-    } else if (currentGame = GAMEB) {
-      setColor(RED);
-    }
-    animFrame = 0;
-    idleTimer.set(1000);
-  }
+  //all we gotta do here is move to game state when it's safe
+  //mimicing the logic from program, we wait until no neighbors are programming or learning
+//  if (!isAlone) {
+//    byte neighborsInProgress = 0;
+//    FOREACH_FACE(f) {
+//      byte neighborState = getLastValueReceivedOnFace(f);
+//      if (!isValueReceivedOnFaceExpired(f)) { //there's something here
+//        switch (neighborState) {
+//          case LEARNA:
+//          case LEARNB:
+//          case PROGRAMA:
+//          case PROGRAMB:
+//            neighborsInProgress++;
+//            break;
+//        }//end of switch
+//      }
+//    }
+//
+//    if (neighborsInProgress == 0) { //no neighbors need programming anymore. Move to ready
+//      changeState(currentGame);
+//    }
+//  }//end of isAlone check
 }
 
 void yawnLoop() {
@@ -322,7 +295,7 @@ void yawnLoop() {
   }
 
   if (animFrame == 3) {
-    blinkState = KO;
+    changeState(KO);
   }
 
   if (animFrame == 30) {
@@ -330,22 +303,53 @@ void yawnLoop() {
   }
 
   if (buttonDoubleClicked()) {//return to menu if double clicked
-    blinkState = MENU;
-    setColorOnFace(dim(GREEN, 16), 0);//reset all the dimness, let the next thing correct for choice
-    setColorOnFace(dim(GREEN, 16), 1);
-    setColorOnFace(dim(GREEN, 16), 2);
-    setColorOnFace(dim(BLUE, 16), 3);
-    setColorOnFace(dim(BLUE, 16), 4);
-    setColorOnFace(dim(BLUE, 16), 5);
-    animFrame = 0;
+    changeState(MENU);
     menuIdleTimer.set(10000);
   }
 
   if (menuIdleTimer.isExpired()) {
-    blinkState = SLEEP;
-    setColor(OFF);
+    changeState(SLEEP);
     buttonDoubleClicked();
     buttonMenuPressed();
   }
+}
+
+void changeState(byte newState) {
+  switch (newState) {
+    case SLEEP:
+      setColor(OFF);
+      break;
+    case GAMEA:
+      setColor(ORANGE);
+      break;
+    case GAMEB:
+      setColor(RED);
+      break;
+    case MENU:
+      setColorOnFace(dim(GREEN, 16), 0);
+      setColorOnFace(dim(GREEN, 16), 1);
+      setColorOnFace(dim(GREEN, 16), 2);
+      setColorOnFace(dim(BLUE, 16), 3);
+      setColorOnFace(dim(BLUE, 16), 4);
+      setColorOnFace(dim(BLUE, 16), 5);
+      animFrame = 0;
+      break;
+    case PROGRAMA:
+    case PROGRAMB:
+    case LEARNA:
+    case LEARNB:
+      setColor(GREEN);
+      animFrame = 0;
+      break;
+    case READY:
+      setColor(dim(GREEN, 16));
+      break;
+    case YAWN:
+      setColor(BLUE);
+      animFrame = 0;
+      break;
+  }
+
+  blinkState = newState;
 }
 
